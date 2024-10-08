@@ -30,10 +30,7 @@ import (
 	expect "github.com/google/goexpect"
 	. "github.com/onsi/gomega"
 
-	k8sv1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/fields"
-	"k8s.io/apimachinery/pkg/labels"
 
 	v1 "kubevirt.io/api/core/v1"
 	"kubevirt.io/client-go/kubecli"
@@ -91,29 +88,6 @@ func GenerateVMJson(vm *v1.VirtualMachine, generateDirectory string) (string, er
 	return jsonFile, nil
 }
 
-func UnfinishedVMIPodSelector(vmi *v1.VirtualMachineInstance) metav1.ListOptions {
-	virtClient := kubevirt.Client()
-
-	var err error
-	vmi, err = virtClient.VirtualMachineInstance(vmi.Namespace).Get(context.Background(), vmi.Name, metav1.GetOptions{})
-	Expect(err).ToNot(HaveOccurred())
-
-	fieldSelectorStr := "status.phase!=" + string(k8sv1.PodFailed) +
-		",status.phase!=" + string(k8sv1.PodSucceeded)
-
-	if vmi.Status.NodeName != "" {
-		fieldSelectorStr = fieldSelectorStr +
-			",spec.nodeName=" + vmi.Status.NodeName
-	}
-
-	fieldSelector := fields.ParseSelectorOrDie(fieldSelectorStr)
-	labelSelector, err := labels.Parse(fmt.Sprintf(v1.AppLabel + "=virt-launcher," + v1.CreatedByLabel + "=" + string(vmi.GetUID())))
-	if err != nil {
-		panic(err)
-	}
-	return metav1.ListOptions{FieldSelector: fieldSelector.String(), LabelSelector: labelSelector.String()}
-}
-
 func GetRunningVMIDomainSpec(vmi *v1.VirtualMachineInstance) (*launcherApi.DomainSpec, error) {
 	runningVMISpec := launcherApi.DomainSpec{}
 	cli := kubevirt.Client()
@@ -137,20 +111,5 @@ func CheckCloudInitMetaData(vmi *v1.VirtualMachineInstance, testFile, testData s
 	}, 15)
 	if err != nil {
 		Expect(res[1].Output).To(ContainSubstring(testData))
-	}
-}
-
-func MountCloudInitFunc(devName string) func(*v1.VirtualMachineInstance) {
-	return func(vmi *v1.VirtualMachineInstance) {
-		cmdCheck := fmt.Sprintf("mount $(blkid  -L %s) /mnt/\n", devName)
-		err := console.SafeExpectBatch(vmi, []expect.Batcher{
-			&expect.BSnd{S: "sudo su -\n"},
-			&expect.BExp{R: console.PromptExpression},
-			&expect.BSnd{S: cmdCheck},
-			&expect.BExp{R: console.PromptExpression},
-			&expect.BSnd{S: console.EchoLastReturnValue},
-			&expect.BExp{R: console.RetValue("0")},
-		}, 15)
-		Expect(err).ToNot(HaveOccurred())
 	}
 }
